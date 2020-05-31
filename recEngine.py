@@ -5,94 +5,108 @@ from pyspark.sql import SQLContext
 from pyspark.ml.recommendation import ALS
 from pyspark.ml.evaluation import RegressionEvaluator
 import pandas as pd
-import os
+from config import Config
 
+# Might have to uncomment?
+# import os
+# memory = '10g'
+# pyspark_submit_args = ' --driver-memory ' + memory + ' pyspark-shell'
+# os.environ["PYSPARK_SUBMIT_ARGS"] = pyspark_submit_args
 
-# Increase memory to allow model to be ran
-memory = '10g'
-pyspark_submit_args = ' --driver-memory ' + memory + ' pyspark-shell'
-os.environ["PYSPARK_SUBMIT_ARGS"] = pyspark_submit_args
 
 # Create Spark object
-spark = SparkSession\
-    .builder\
-    .appName("example-spark")\
-    .config("spark.sql.crossJoin.enabled", "true")\
-    .getOrCreate()
-sc = SparkContext.getOrCreate()
-sqlContext = SQLContext(sc)
+def spark(SparkSession):
+    spark = SparkSession\
+        .builder\
+        .appName("example-spark")\
+        .config("spark.sql.crossJoin.enabled", "true")\
+        .getOrCreate()
+    sc = SparkContext.getOrCreate()
+    pyspark = SQLContext(sc)
+    return pyspark
 
-# Read in three csv's to PySpark dataframes
-movies = sqlContext.read.csv("data/movies.csv", header=True)
-#movies.show()
 
-ratings = sqlContext.read.csv("data/ratings.csv", header=True)
-ratings = ratings.drop('timestamp')
+def read_data(mov, rat, sqlContext):
+    movies = sqlContext.read.csv(mov, header=True)
 
-ratings = ratings.selectExpr("cast(userId as int) userId",
-    "cast(movieId as int) movieId",
-    "cast(rating as int) rating")
+    ratings = sqlContext.read.csv(rat, header=True)
+    ratings = ratings.drop('timestamp')
+    ratings = ratings.selectExpr("cast(userId as int) userId",
+        "cast(movieId as int) movieId",
+        "cast(rating as int) rating")
+    return movies, ratings
 
-#ratings.show()
+def split(movies, ratings):
+    # Split ratings and movies dataframes into training and testing sets
+    movies_train, movies_test = movies.randomSplit([0.8, 0.2])
+    ratings_train, ratings_test = ratings.randomSplit([0.8, 0.2])
+    return movies_train, movies_test, ratings_train, ratings_test
 
-#tags = sqlContext.read.csv("data/tags.csv", header=True)
-#tags.show()
 
-# Split ratings and movies dataframes into training and testing sets
-movies_train, movies_test = movies.randomSplit([0.8, 0.2])
-ratings_train, ratings_test = ratings.randomSplit([0.8, 0.2])
+def model(ratings_train):
+    als = ALS(maxIter=5, regParam=0.09, rank=25, userCol="userId", itemCol="movieId", ratingCol="rating",
+              coldStartStrategy="drop", nonnegative=True)
+    model = als.fit(ratings_train)
+    return model
 
-# # Creates ALS model
-# rank = 10
-# iterations = 10
-# model = ALS.train(ratings_train, rank, iterations)
 
-als = ALS(maxIter=5, regParam=0.09, rank=25, userCol="userId", itemCol="movieId", ratingCol="rating",
-          coldStartStrategy="drop", nonnegative=True)
-model = als.fit(ratings_train)
+def predict(model, ratings_test):
+    evaluator = RegressionEvaluator(metricName="rmse", labelCol="rating", predictionCol="prediction")
+    predictions = model.transform(ratings_test)
 
-evaluator = RegressionEvaluator(metricName="rmse", labelCol="rating", predictionCol="prediction")
-predictions = model.transform(ratings_test)
-
-rmse = evaluator.evaluate(predictions)
-print("RMSE= "+str(rmse))
+    rmse = evaluator.evaluate(predictions)
+    print("RMSE= "+str(rmse))
+    return predictions
 
 #predictions.show()
 
-user_recs = model.recommendForAllUsers(20).show(5)
-#user_recs.show()
 
-# NEW
-recs = model.recommendForAllUsers(10).toPandas()
-nrecs = recs.recommendations.apply(pd.Series) \
-    .merge(recs, right_index=True, left_index=True) \
-    .drop(["recommendations"], axis=1) \
-    .melt(id_vars=['userId'], value_name="recommendation") \
-    .drop("variable", axis=1) \
-    .dropna()
-nrecs = nrecs.sort_values('userId')
-nrecs = pd.concat([nrecs['recommendation'].apply(pd.Series), nrecs['userId']], axis=1)
-nrecs.columns = [
+def recommendations(model, ratings):
+    user_recs = model.recommendForAllUsers(20).show(5)
+    user_recs.show()
 
-    'movieId',
-    'rating',
-    'userId'
+    # NEW
+    recs = model.recommendForAllUsers(10).toPandas()
+    nrecs = recs.recommendations.apply(pd.Series) \
+        .merge(recs, right_index=True, left_index=True) \
+        .drop(["recommendations"], axis=1) \
+        .melt(id_vars=['userId'], value_name="recommendation") \
+        .drop("variable", axis=1) \
+        .dropna()
+    nrecs = nrecs.sort_values('userId')
+    nrecs = pd.concat([nrecs['recommendation'].apply(pd.Series), nrecs['userId']], axis=1)
+    nrecs.columns = [
 
-]
-md = ratings.select(ratings['userId'], ratings['userId'], ratings['movieId'], ratings['movieId'])
-md = md.toPandas()
-dict1 = dict(zip(md['userId'], md['userId']))
-dict2 = dict(zip(md['movieId'], md['movieId']))
-nrecs['userId'] = nrecs['userId'].map(dict1)
-nrecs['movieId'] = nrecs['movieId'].map(dict2)
-nrecs = nrecs.sort_values('userId')
-nrecs.reset_index(drop=True, inplace=True)
-new = nrecs[['userId', 'movieId', 'rating']]
-new['recommendations'] = list(zip(new.movieId, new.rating))
-res = new[['userId', 'recommendations']]
-res_new = res['recommendations'].groupby([res.userId]).apply(list).reset_index()
-print(res_new)
+        'movieId',
+        'rating',
+        'userId'
 
+    ]
+    md = ratings.select(ratings['userId'], ratings['userId'], ratings['movieId'], ratings['movieId'])
+    md = md.toPandas()
+    dict1 = dict(zip(md['userId'], md['userId']))
+    dict2 = dict(zip(md['movieId'], md['movieId']))
+    nrecs['userId'] = nrecs['userId'].map(dict1)
+    nrecs['movieId'] = nrecs['movieId'].map(dict2)
+    nrecs = nrecs.sort_values('userId')
+    nrecs.reset_index(drop=True, inplace=True)
+    new = nrecs[['userId', 'movieId', 'rating']]
+    new['recommendations'] = list(zip(new.movieId, new.rating))
+    res = new[['userId', 'recommendations']]
+    res_new = res['recommendations'].groupby([res.userId]).apply(list).reset_index()
+    print(res_new)
+    return res_new
+
+def main():
+    sqlContext = spark(SparkSession)
+    read_data("data/movies.csv", "data/ratings.csv", sqlContext=sqlContext)
+    split(movies=-movies, ratings=ratings)
+    predict(model=model, ratings_test=ratings_test)
+    recommendations(model=model, training=ratings)
+
+
+if __name__ == "__main__":
+    main()
 
 # # NEW
 # recs = model.recommendForAllUsers(10).toPandas()
@@ -127,6 +141,12 @@ print(res_new)
 # print(res_new)
 
 # ----------
+
+
+# # Creates ALS model
+# rank = 10
+# iterations = 10
+# model = ALS.train(ratings_train, rank, iterations)
 
 #recs = model.recommendProducts(4169, 5)
 # predictions = model.transform(ratings_test.select(["user", "item"]))
