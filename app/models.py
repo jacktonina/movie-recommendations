@@ -10,13 +10,13 @@ followers = db.Table('followers',
     db.Column('followed_id', db.Integer, db.ForeignKey('user.id'))
 )
 
+
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), index=True, unique=True)
     email = db.Column(db.String(120), index=True, unique=True)
     password_hash = db.Column(db.String(128))
     ratings = db.relationship('Rating', backref='rater', lazy='dynamic')
-
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -26,6 +26,9 @@ class User(UserMixin, db.Model):
 
     def __repr__(self):
         return '<User {}>'.format(self.username)
+
+    about_me = db.Column(db.String(140))
+    last_seen = db.Column(db.DateTime, default=datetime.utcnow)
 
     followed = db.relationship(
         'User', secondary=followers,
@@ -52,12 +55,12 @@ class User(UserMixin, db.Model):
         own = Rating.query.filter_by(user_id=self.id)
         return followed.union(own).order_by(Rating.timestamp.desc())
 
+
 class Rating(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     movie_id = db.Column(db.Integer, primary_key=True)
     rate = db.Column(db.String)
     timestamp = db.Column(db.DateTime, index=True, default=datetime.utcnow)
-
 
     def __repr__(self):
         return '<Rating: {}>'.format(self.rate)
