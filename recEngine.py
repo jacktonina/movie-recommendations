@@ -36,11 +36,12 @@ def read_data(mov, rat, sqlContext):
         "cast(rating as int) rating")
     return movies, ratings
 
-def split(movies, ratings):
+
+def split(ratings):
     # Split ratings and movies dataframes into training and testing sets
-    movies_train, movies_test = movies.randomSplit([0.8, 0.2])
+    #movies_train, movies_test = movies.randomSplit([0.8, 0.2])
     ratings_train, ratings_test = ratings.randomSplit([0.8, 0.2])
-    return movies_train, movies_test, ratings_train, ratings_test
+    return ratings_train, ratings_test
 
 
 def model(ratings_train):
@@ -57,8 +58,6 @@ def predict(model, ratings_test):
     rmse = evaluator.evaluate(predictions)
     print("RMSE= "+str(rmse))
     return predictions
-
-#predictions.show()
 
 
 def recommendations(model, ratings):
@@ -97,16 +96,28 @@ def recommendations(model, ratings):
     print(res_new)
     return res_new
 
+
 def main():
     sqlContext = spark(SparkSession)
-    read_data("data/movies.csv", "data/ratings.csv", sqlContext=sqlContext)
-    split(movies=-movies, ratings=ratings)
-    predict(model=model, ratings_test=ratings_test)
-    recommendations(model=model, training=ratings)
+    data = read_data("data/movies.csv", "data/ratings.csv", sqlContext=sqlContext)
+    movies = data[0]
+    ratings = data[1]
+    splits = split(ratings=ratings)
+    rating_train = splits[0]
+    rating_test = splits[1]
+    create_model = model(rating_train)
+    print(create_model)
+    preds = predict(model=create_model, ratings_test=rating_test)
+    print(preds)
+    preds.show()
+    recs = recommendations(model=create_model, ratings=ratings)
+    print(recs)
+    recs.show()
 
 
 if __name__ == "__main__":
     main()
+
 
 # # NEW
 # recs = model.recommendForAllUsers(10).toPandas()

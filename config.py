@@ -12,3 +12,4 @@ class Config(object):
     memory = '10g'
     pyspark_submit_args = ' --driver-memory ' + memory + ' pyspark-shell'
     os.environ["PYSPARK_SUBMIT_ARGS"] = pyspark_submit_args
+    POSTS_PER_PAGE = 5
